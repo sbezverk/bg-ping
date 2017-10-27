@@ -82,7 +82,7 @@ func pingClient(c *icmp.PacketConn, targetAddr string, control chan pingPacket, 
 		}
 		wb, err := wm.Marshal(nil)
 		if err != nil {
-			// return err
+			log.Fatalf("pingClient failed to marshal icmp packet: %v\n", err)
 		}
 		_, err = c.WriteTo(wb, &net.IPAddr{IP: net.ParseIP(targetAddr)})
 		if err != nil {
