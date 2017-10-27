@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"golang.org/x/net/icmp"
@@ -19,8 +20,7 @@ type pingPacket struct {
 	Seq int
 }
 
-var outage = false
-var logFile *os.File
+var outage bool
 
 func pingServer(c *icmp.PacketConn, targetAddr string, control chan pingPacket) {
 	b := make([]byte, 65507)
@@ -28,7 +28,7 @@ func pingServer(c *icmp.PacketConn, targetAddr string, control chan pingPacket) 
 
 		count, packetAddr, err := c.ReadFrom(b)
 		if err != nil {
-			log.Printf("pingServer failed to read icmp packet: %v", err)
+			// log.Printf("pingServer failed to read icmp packet: %v", err)
 			continue
 		}
 		if strings.Compare(packetAddr.String(), targetAddr) != 0 {
@@ -38,7 +38,7 @@ func pingServer(c *icmp.PacketConn, targetAddr string, control chan pingPacket) 
 		// log.Printf("pingServer received %d bytes from ip: %s ", count, packetAddr.String())
 		m, err := icmp.ParseMessage(1, b[:count])
 		if err != nil {
-			log.Printf("pingServer failed to parse icmp packet: %v", err)
+			// log.Printf("pingServer failed to parse icmp packet: %v", err)
 			continue
 		}
 		switch b := m.Body.(type) {
@@ -58,7 +58,15 @@ func timeStamp() string {
 	return fmt.Sprintf("%d-%02d-%02dT%02d:%02d:%02d_%04d", t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond()/1000000)
 }
 
-func pingClient(c *icmp.PacketConn, targetAddr string, control chan pingPacket) {
+func recordEvent(msg string, logFile *os.File) {
+	r := fmt.Sprintf("| %-30s| %-26s|\n", msg, timeStamp())
+	if _, err := logFile.WriteString(r); err != nil {
+		log.Fatalf("Failed to record event into the log: %v\n", err)
+	}
+	logFile.Sync()
+}
+
+func pingClient(c *icmp.PacketConn, targetAddr string, control chan pingPacket, logFile *os.File) {
 
 	processID := rand.Intn(65535)
 	processSeq := 1
@@ -85,7 +93,7 @@ func pingClient(c *icmp.PacketConn, targetAddr string, control chan pingPacket) 
 			// log.Printf("reply received ID %d Seq %d\n", p.ID, p.Seq)
 			if p.ID == processID && p.Seq == processSeq {
 				if outage {
-					fmt.Fprintf(logFile, "Connectivity outage detected at: %s\n", timeStamp())
+					recordEvent("Connectivity outage cleared", logFile)
 				}
 				outage = false
 				processSeq++
@@ -94,7 +102,7 @@ func pingClient(c *icmp.PacketConn, targetAddr string, control chan pingPacket) 
 		case <-time.After(1900 * time.Millisecond):
 			// log.Printf("Pause longer than 2 seconds, connectivity outage...")
 			if !outage {
-				fmt.Fprintf(logFile, "Connectivity outage cleared at: %s\n", timeStamp())
+				recordEvent("Connectivity outage detected", logFile)
 			}
 			outage = true
 		}
@@ -114,27 +122,33 @@ func main() {
 	}
 	defer connection.Close()
 	t := time.Now()
-	logFileName := fmt.Sprintf("/tmp/bg-ping.%d-%02d-%02dT%02d:%02d:%02d", t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second())
+	logFileName := fmt.Sprintf("/tmp/bg-ping_%s_%d-%02d-%02dT%02d:%02d:%02d", os.Args[1], t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second())
 	logFile, err := os.Create(logFileName)
 	if err != nil {
 		log.Fatalf("%s failed to create log %s: %v\n", os.Args[0], logFileName, err)
 	}
-	defer logFile.Close()
+	// defer logFile.Close()
 
 	// Capture SIGTERM to close the log file before exiting
 	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt)
+	signal.Notify(c,
+		syscall.SIGHUP,
+		syscall.SIGINT,
+		syscall.SIGTERM,
+		syscall.SIGQUIT)
 	go func() {
 		for sig := range c {
 			fmt.Fprintf(logFile, "%s: Captured %v, closing log and terminating...\n", timeStamp(), sig)
+			connection.Close()
 			logFile.Close()
 			os.Exit(0)
 		}
 	}()
 
-	fmt.Fprintf(logFile, "%s: Starting pingServer and pingClient...\n", timeStamp())
+	fmt.Fprintf(logFile, "%s: Starting pingServer and pingClient checking connectivity to %s .\n", timeStamp(), os.Args[1])
 	// log.Printf("Listening for icmp on: %s\n", connection.LocalAddr().String())
+	outage = false
 	control := make(chan pingPacket)
 	go pingServer(connection, os.Args[1], control)
-	pingClient(connection, os.Args[1], control)
+	pingClient(connection, os.Args[1], control, logFile)
 }
