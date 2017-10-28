@@ -127,7 +127,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("%s failed to create log %s: %v\n", os.Args[0], logFileName, err)
 	}
-	// defer logFile.Close()
+	defer logFile.Close()
 
 	// Capture SIGTERM to close the log file before exiting
 	c := make(chan os.Signal, 1)
