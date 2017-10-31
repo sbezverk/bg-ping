@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"net"
@@ -30,6 +31,13 @@ type pClient struct {
 
 var wg sync.WaitGroup
 
+const programVersion = "0.2.1"
+
+func usage() string {
+	return fmt.Sprintf("\nUsage:\n%s \t--ip Comma separated list of IPs to monitor, ex: --ip X.X.X.X,Y.Y.Y.Y \n\t\t[--log folder where to create the log file. Default: /var/log/ ]\n\n", os.Args[0])
+
+}
+
 func isValidIPv4(ip string) bool {
 	parts := strings.Split(ip, ".")
 	if len(parts) != 4 {
@@ -52,9 +60,8 @@ func timeStamp() string {
 	return fmt.Sprintf("%d-%02d-%02dT%02d:%02d:%02d_%04d", t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond()/1000000)
 }
 
-func startLogging() *os.File {
-	t := time.Now()
-	logFileName := fmt.Sprintf("/tmp/bg-ping_%d-%02d-%02dT%02d:%02d:%02d", t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second())
+func startLogging(logLocation string) *os.File {
+	logFileName := fmt.Sprintf("%s/bg-ping.log", logLocation)
 	logFile, err := os.Create(logFileName)
 	if err != nil {
 		log.Fatalf("%s failed to create log %s: %v\n", os.Args[0], logFileName, err)
@@ -63,16 +70,14 @@ func startLogging() *os.File {
 	return logFile
 }
 
-func parseIPs(params []string) ([]string, error) {
+func parseIPs(listIPs string) ([]string, error) {
 	var pingIPs []string
-	for _, l1 := range params {
-		l2 := strings.Split(l1, ",")
-		for _, l3 := range l2 {
-			if !isValidIPv4(l3) {
-				return nil, fmt.Errorf(" %s is an invalid ip address", l3)
-			}
-			pingIPs = append(pingIPs, l3)
+	ips := strings.Split(listIPs, ",")
+	for _, ip := range ips {
+		if !isValidIPv4(ip) {
+			return nil, fmt.Errorf(" %s is an invalid ip address", ip)
 		}
+		pingIPs = append(pingIPs, ip)
 	}
 	return pingIPs, nil
 }
@@ -155,20 +160,40 @@ func pingClient(c *icmp.PacketConn, clientID int, client pClient, logFile *os.Fi
 
 func main() {
 
+	listIPs := flag.String("ip", "", "comma seprated list of ip addresses to monitor.")
+	logLocation := flag.String("log", "/var/log/", "Location of the log file.")
+	help := flag.Bool("help", false, "Prints usage.")
+	version := flag.Bool("ver", false, "Prints the program's version")
+
+	flag.Parse()
+
+	if *help {
+		fmt.Printf("%s", usage())
+		os.Exit(0)
+	}
+	if *version {
+		fmt.Printf("\nVersion: %s\n\n", programVersion)
+		os.Exit(0)
+	}
+	if len(flag.Args()) != 0 {
+		fmt.Printf("\nUnknown parameter %s see usage below, terinating.\n", flag.Args())
+		fmt.Printf("%s", usage())
+		os.Exit(1)
+	}
 	if len(os.Args) < 2 {
 		log.Fatalf("%s missing remote ip address(es) for ping, terminating...", os.Args[0])
 		os.Exit(1)
 	}
 
 	// Parse and validate the list of IPs passed as argument(s)
-	pingIPs, err := parseIPs(os.Args[1:])
+	pingIPs, err := parseIPs(*listIPs)
 	if err != nil {
 		log.Fatalf("%s failed: %v, terminating...", os.Args[0], err)
 		os.Exit(1)
 	}
 
 	// Start logging
-	logFile := startLogging()
+	logFile := startLogging(*logLocation)
 	defer logFile.Close()
 
 	// Build pingClientsList
