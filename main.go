@@ -180,15 +180,11 @@ func main() {
 		fmt.Printf("%s", usage())
 		os.Exit(1)
 	}
-	if len(os.Args) < 2 {
-		log.Fatalf("%s missing remote ip address(es) for ping, terminating...", os.Args[0])
-		os.Exit(1)
-	}
 
 	// Parse and validate the list of IPs passed as argument(s)
 	pingIPs, err := parseIPs(*listIPs)
 	if err != nil {
-		log.Fatalf("%s failed: %v, terminating...", os.Args[0], err)
+		log.Fatalf("%s failed: %v, terminating.", os.Args[0], err)
 		os.Exit(1)
 	}
 
@@ -210,7 +206,7 @@ func main() {
 	// Open connection for listen all incoming icmp packets
 	connection, err := icmp.ListenPacket("ip4:icmp", "0.0.0.0")
 	if err != nil {
-		recordEvent(fmt.Sprintf("%s failed to listen for icmp packets with: %v, terminating", os.Args[0], err), logFile)
+		recordEvent(fmt.Sprintf("%s failed to listen for icmp packets with: %v, terminating.", os.Args[0], err), logFile)
 		os.Exit(1)
 	}
 	defer connection.Close()
@@ -224,7 +220,7 @@ func main() {
 		syscall.SIGQUIT)
 	go func() {
 		for sig := range c {
-			recordEvent(fmt.Sprintf("Captured %v, closing log and terminating", sig), logFile)
+			recordEvent(fmt.Sprintf("Captured %v, closing log and terminating.", sig), logFile)
 			connection.Close()
 			logFile.Close()
 			os.Exit(0)
